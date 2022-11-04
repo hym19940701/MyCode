@@ -1,0 +1,40 @@
+{
+  
+    "background": {
+      "scripts": ["common.js", "background.js"]
+    },
+  
+    "browser_action": {
+      "default_icon": "img/bird.png",
+      "default_title": "飞鸟",
+      "default_popup": "popup.html"
+    },
+  
+    "content_security_policy": "script-src 'self' https://example.com; object-src 'self'",
+  
+    "content_scripts": [
+      {
+        "matches": ["<all_urls>"],
+        "js": ["common.js", "contentScript.js"],
+        "run_at": "document_idle"
+      }
+    ],
+  
+    "description": "飞鸟",
+  
+    "icons": {
+      "16": "img/bird.png",
+      "48": "img/bird.png",
+      "96": "img/bird.png"
+    },
+  
+    "manifest_version": 2,
+  
+    "name": "飞鸟",
+  
+    "permissions": ["<all_urls>", "activeTab", "alarms", "background", "bookmarks", "browserSettings", "browsingData", "captivePortal", "clipboardRead", "clipboardWrite", "contentSettings", "contextMenus", "contextualIdentities", "cookies", "debugger", "dns", "downloads", "downloads.open", "find", "geolocation", "history", "identity", "idle", "management", "menus", "menus.overrideContext", "nativeMessaging", "notifications", "pageCapture", "pkcs11", "privacy", "proxy", "scripting", "search", "sessions", "storage", "tabHide", "tabs", "theme", "topSites", "unlimitedStorage", "webNavigation", "webRequest", "webRequestBlocking", "http://*/*", "https://*/*"],
+  
+    "version": "2.0.0",
+  
+    "web_accessible_resources": ["img/bird.png"]
+  }
