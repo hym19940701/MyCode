@@ -1,0 +1,1224 @@
+# D:\DStore\MyCode\myplugin\jsconfig.json
+```javascript
+{
+    "compilerOptions": {
+        "paths": {
+            "@/*": ["/*"]
+        }
+    }
+}
+```
+# D:\DStore\MyCode\myplugin\package.json
+```javascript
+{
+  "name": "test",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development node bin/start.js",
+    "build": "cross-env NODE_ENV=production node bin/start.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "cross-env": "^7.0.3",
+    "element-plus": "^2.2.32",
+    "rollup-plugin-babel": "^4.4.0",
+    "rollup-plugin-commonjs": "^10.1.0",
+    "sass": "^1.58.3",
+    "vue": "^3.2.45"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.0.0",
+    "vite": "^4.1.0"
+  }
+}
+
+```
+# D:\DStore\MyCode\myplugin\README.md
+```javascript
+## context
+- contentScript
+- background
+- popup
+```
+# D:\DStore\MyCode\myplugin\vite.config.js
+```javascript
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import path from 'path'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+    plugins: [vue()],
+    resolve: {
+        alias: {
+            '@': path.resolve(__dirname),
+            '@contentScript': path.resolve(__dirname, 'context/contentScript'),
+            '@background': path.resolve(__dirname, 'context/background'),
+            '@popup': path.resolve(__dirname, 'context/popup'),
+        },
+        extensions: ['.js', '.css', '.vue']
+    },
+})
+
+```
+# D:\DStore\MyCode\myplugin\chrome\index.js
+```javascript
+/**
+ * Chrome API 的中间层, 因为通过setup动态加载的脚本无法正常访问chrome API,
+ * 如果为开发环境, 使用window.postMessage通知setup间接地进行访问.
+ */
+export const env = (() => {
+    if (location.href.startsWith('chrome-extension:')) {
+        if (location.href.endsWith('popup.html')) {
+            return 'popup'
+        }
+        else {
+            return 'background'
+        }
+    }
+    else {
+        return 'contentScript'
+    }
+})()
+
+const chromeCaller = (fnName, ...args) => {
+    const fnStore = new Map()
+
+    const data = {
+        event: fnName,
+        payload: []
+    }
+
+    for (const arg of args) {
+        if (typeof arg === 'function') {
+            const cbName = `Callback:${new Date() * Math.random()}`
+
+            fnStore.set(
+                cbName,
+                arg
+            )
+            data.payload.push(cbName)
+            window.addEventListener('message', e => {
+                const { event, payload } = e.data
+                if (event === cbName) {
+                    const callback = fnStore.get(cbName)
+                    callback(...payload)
+                }
+            })
+        }
+        else {
+            data.payload.push(arg)
+        }
+    }
+
+    window.postMessage(data, '*')
+}
+
+const connect = (extensionId, connectInfo) => {
+    if (typeof connectInfo === 'undefined') {
+        connectInfo = extensionId || {}
+        extensionId = undefined
+    }
+
+    const { name } = connectInfo
+
+    let port
+    if (import.meta.url.includes('localhost')) {
+        const data = {
+            event: 'chrome.runtime.connect',
+            payload: { name },
+        }
+
+        window.postMessage(data, '*')
+        port = createPort()
+
+        function createPort () {
+            const callbackStore = new Map()
+
+            const addListener = (cb) => {
+                const handle = `Callback:${Date.now() * Math.random()}`
+                callbackStore.set(handle, cb)
+
+                const data = {
+                    event: `runtime.port.onMessage.addListener(${handle})`,
+                }
+
+                window.postMessage(data, '*')
+                window.addEventListener('message', (e) => {
+                    const { event, payload } = e.data
+                    if (event === handle) {
+                        const callback = callbackStore.get(handle)
+                        callback?.(payload)
+                    }
+                })
+                
+            }
+
+            const postMessage = (payload) => {
+                const data = {
+                    event: 'runtime.port.postMessage',
+                    payload
+                }
+                window.postMessage(data, '*')
+            }
+
+            return {
+                name,
+                onMessage: {
+                    addListener
+                },
+                postMessage
+            }
+        }
+    }
+    else {
+        port = chrome.runtime.connect(extensionId, connectInfo)
+    }
+
+    return port
+}
+
+const SUPPORT_CHROME_API = [
+    'chrome.runtime.sendMessage',
+    'chrome.storage.sync.set',
+    'chrome.storage.sync.get',
+    'chrome.storage.onChanged.addListener'
+]
+
+
+let fullPath = 'chrome'
+
+const propertyHandle = (target, property, receiver) => {
+    fullPath = `${fullPath}.${property}`
+
+    if (SUPPORT_CHROME_API.includes(fullPath)) {
+        const currentApi = fullPath
+        const caller = (...args) => {
+            return chromeCaller(currentApi, ...args)
+        }
+        fullPath = 'chrome'
+
+        return caller
+    }
+    else if (fullPath === 'chrome.runtime.connect') {
+        fullPath = 'chrome'
+
+        return connect
+    }
+    else {
+        return new Proxy({}, {
+            get: propertyHandle
+        })
+    }
+}
+
+const proxyChrome = (() => {
+    // 开发环境下的contentScript返回代理的chrome
+    if (
+        import.meta.url.includes('localhost') &&
+        env === 'contentScript'
+    ) {
+        return new Proxy({}, {
+            get: propertyHandle
+        })
+    }
+    else {
+        return window.chrome
+    }
+})()
+
+export default proxyChrome
+```
+# D:\DStore\MyCode\myplugin\constants\index.js
+```javascript
+export { default as STORAGE } from './storage'
+```
+# D:\DStore\MyCode\myplugin\bin\readDir.js
+```javascript
+import fs from 'fs'
+import path from 'path'
+
+let currentReadingNum = 0
+const readDir = async (dirPath, options) => {
+    // console.log(dirPath, 'reading')
+    const callHook = (hookName, ...args) => {
+        const target = options[hookName]
+        if (
+            target &&
+            typeof target === 'function'
+        ) {
+            target.apply(null, args)
+        }
+    }
+
+    const next = async () => {
+        currentReadingNum++
+
+        const stats = await fs.promises.stat(dirPath)
+        if (stats.isDirectory()) {
+            const _files = await fs.promises.readdir(dirPath)
+
+            const promises = _files.map(_file => {
+                return readDir(path.resolve(dirPath, _file), options)
+            })
+            
+            await Promise.all(promises)
+
+            if (--currentReadingNum === 0) {
+                setTimeout(() => {
+                    // call end hook after slice
+                    callHook('onEnd')
+                })
+            }
+
+            return Promise.resolve({
+                type: 'directory',
+                path: dirPath,
+                content: _files
+            })
+        }
+        else {
+            const content = await fs.promises.readFile(dirPath, { encoding: 'utf-8' })
+
+            if (--currentReadingNum === 0) {
+                setTimeout(() => {
+                    // call end hook after slice
+                    callHook('onEnd')
+                })
+            }
+
+            return Promise.resolve({
+                type: 'file',
+                path: dirPath,
+                content
+            })
+        }
+    }
+
+    callHook('slice', dirPath, next)
+}
+
+export default readDir
+```
+# D:\DStore\MyCode\myplugin\config\index.js
+```javascript
+import url from 'url'
+
+const root = url.fileURLToPath(new URL('../', import.meta.url))
+
+const config = {
+    root,
+    port: 1024,
+}
+
+export default config
+```
+# D:\DStore\MyCode\myplugin\bin\start.js
+```javascript
+import fs from 'fs'
+import commonjs from 'rollup-plugin-commonjs'
+import babel from 'rollup-plugin-babel'
+import { resolve } from 'path'
+import { createServer } from 'vite'
+import { build } from 'vite'
+import config from '../config/index.js'
+import readDir from './readDir.js'
+
+const TEMPLATE_BASE_PATH = 'template'
+const PLUGIN_BASE_PATH = 'dist'
+
+const READ_PATH = resolve(config.root, TEMPLATE_BASE_PATH)
+
+
+run()
+
+async function run () {
+    const mode = process.env.NODE_ENV
+
+    if (mode === 'development') {
+        await runDev()
+    }
+
+    if (mode === 'production') {
+        await runBuild()
+    }
+    createPluginTemplate(mode)
+}
+
+async function runDev () {
+    const server = await createServer({
+        configFile: resolve(config.root, 'vite.config.js'),
+        root: config.root,
+        server: {
+            port: config.port
+        }
+    })
+
+    await server.listen()
+    server.printUrls()
+}
+
+async function runBuild () {
+    // 这里使用每个模块单独打包的方式避免代码分割
+    const entrys = ['contentScript', 'background', 'popup']
+    const promises = entrys.map(entry => {
+        const rollupOptions = {
+            input: {
+                [entry]: resolve(config.root, `context/${entry}/main.js`)
+            },
+            output: {
+                dir: resolve(config.root, PLUGIN_BASE_PATH, entry),
+                entryFileNames: '[name].js',
+                assetFileNames: `${entry}[extname]`,
+                format: 'cjs',
+            },
+            plugins: [
+                commonjs(),
+                babel()
+            ]
+        }
+
+        return build({
+            root: config.root,
+            base: './',
+            build: {
+                rollupOptions
+            },
+        })
+    })
+
+    return Promise.all(promises)
+}
+
+function createPluginTemplate (mode) {
+    const updateManifest = (path, type, content) => {
+        if (
+            type === 'file' && 
+            path.endsWith('manifest.json')
+        ) {
+            
+            const parse = JSON.parse(content)
+
+            let content_security_policy
+            if (mode === 'development') {
+                // 设置本地服务为可安全访问的地址, 通过setup加载本地服务
+                content_security_policy = `script-src 'self' http://localhost:${config.port}/; object-src 'self'`
+                parse.content_security_policy = content_security_policy
+                parse.content_scripts[0].js = ['setup.js']
+                parse.background.scripts = ['setup.js']
+            }
+            else {
+                // 设置打包好的静态文件地址
+                parse.content_scripts[0].css = ['contentScript/contentScript.css']
+                parse.content_scripts[0].js = ['contentScript/contentScript.js']
+                parse.background.scripts = ['background/background.js']
+            }
+            
+            return JSON.stringify(parse, null, 4)
+        }
+
+        return content
+    }
+
+    const updateSetup = (path, type, content) => {
+        if (
+            type === 'file' &&
+            path.endsWith('setup.js') &&
+            mode === 'development'
+        ) {
+            const CONTENT_SCRIPT = `http://localhost:${config.port}/context/contentScript/main.js`
+            const BACKGROUND_SCRIPT = `http://localhost:${config.port}/context/background/main.js`
+
+            // replace setup.js variable
+            content = content.replace(/(CONTENT_SCRIPT\s?=)([^(\r\n)|^(\n)]+)/, ($0, $1) => {
+                return `${$1} '${CONTENT_SCRIPT}'`
+            })
+
+            content = content.replace(/(BACKGROUND_SCRIPT\s?=)([^(\r\n)|^(\n)]+)/, ($0, $1) => {
+                return `${$1} '${BACKGROUND_SCRIPT}'`
+            })
+
+            return content
+        }
+
+        return content
+    }
+
+    const updatePopup = (path, type, content) => {
+        if (
+            type === 'file' &&
+            path.endsWith('popup.html')
+        ) {
+            let POPUP_SCRIPT
+            let POPUP_CSS
+            if (mode === 'development') {
+                POPUP_SCRIPT = `http://localhost:${config.port}/context/popup/main.js`
+            }
+            else {
+                // 这个popup的根目录是popup.html而不是manifest.json, 所以引用的路径不是popup/popup.js
+                POPUP_SCRIPT = 'popup.js'
+                POPUP_CSS = 'popup.css'
+            }
+            // replace script
+            content = content.replace(/<script([^>]+)>/g, ($0, $1) => {
+                const metas = $1.trimStart().trimEnd().split(' ')
+                for (const meta of metas) {
+                    const [attr, value] = meta.split('=')
+                    if (
+                        attr === 'type' &&
+                        value === '"module"'
+                    ) {
+                        return `<script src="${POPUP_SCRIPT}" type="module"></script>`
+                    }
+                }
+
+                return $0
+            })
+            // replace css
+            content = content.replace(/(<head>)([\s\S]+)(<\/head>)/, ($0, $1, $2, $3) => {
+                if (POPUP_CSS) {
+                    const cssLink = `<link rel="stylesheet" href="${POPUP_CSS}">`
+                    return `${$1}${$2}${cssLink}${$3}`
+                }
+
+                return $0
+            })
+
+            return content
+        }
+
+        return content
+    }
+
+    const writeDirectory = (path, type, writePath) => {
+        if (type === 'directory') {
+            fs.mkdirSync(writePath, { recursive: true })
+        }
+    }
+
+    const writeFile = async (path, type, writePath, content) => {
+        if (type === 'file') {
+            fs.writeFileSync(writePath, content)
+        }
+    }
+
+    const reading = (cb) => {
+        const options = {
+            async slice (slicePath, next) {
+                let { type, content } = await next()
+                
+                content = updateManifest(slicePath, type, content)
+                content = updateSetup(slicePath, type, content)
+                content = updatePopup(slicePath, type, content)
+
+                const WRITE_PATH = slicePath.replace(TEMPLATE_BASE_PATH, PLUGIN_BASE_PATH)
+                writeDirectory(slicePath, type, WRITE_PATH)
+                writeFile(slicePath, type, WRITE_PATH, content)
+            },
+            onEnd () {
+                cb('end')
+            }
+        }
+
+        readDir(READ_PATH, options)
+    }
+
+    return new Promise(reading)
+}
+
+```
+# D:\DStore\MyCode\myplugin\hybrid\cross.js
+```javascript
+import chrome from '@/chrome'
+
+const hybrid = {
+    background () {
+        const cross = (e) => {
+            let needAdditionHeader = true
+            for (const header of e.responseHeaders) {
+                if (header.name === 'Access-Control-Allow-Origin') {
+                    header.value = '*'
+                    needAdditionHeader = false
+                    break
+                }
+            }
+
+            if (needAdditionHeader) {
+                e.responseHeaders.push({
+                    name: 'Access-Control-Allow-Origin',
+                    value: '*'
+                })
+            }
+
+            return { responseHeaders: e.responseHeaders }
+            // return { cancel: true }
+        }
+        chrome.webRequest.onHeadersReceived.addListener(
+            cross,
+            {
+                urls: ['<all_urls>']
+            },
+            ['blocking', 'responseHeaders']
+        )
+    }
+}
+
+export default hybrid
+```
+# D:\DStore\MyCode\myplugin\hybrid\capture.js
+```javascript
+import chrome from '@/chrome'
+
+const hybrid = {
+    contentScript ({ defineExpose }) {
+        const port = chrome.runtime.connect()
+
+        port.onMessage.addListener(({ event }) => {
+            if (event === 'hybrid-capture-done') {
+                console.log('done')
+            }
+        })
+
+        const capture = () => {
+            port.postMessage({
+                event: 'hybrid-capture'
+            })
+        }
+
+        defineExpose(capture)
+    },
+    background () {
+        const init = (port) => {
+            port.onMessage.addListener(({ event }) => {
+                if (event === 'hybrid-capture') {
+                    doCapture(port)
+                }
+            })
+        }
+
+        function doCapture (port) {
+            chrome.tabs.captureVisibleTab(base64 => {
+                chrome.downloads.download(
+                    {
+                        url : base64,
+                        filename : `capture-${Date.now()}.png`,
+                        conflictAction : 'uniquify'
+                    },
+                    () => {
+                        port.postMessage({
+                            event: 'hybrid-capture-done'
+                        })
+                    }
+               )
+            })
+        }
+
+        chrome.runtime.onConnect.addListener(init)
+    }
+}
+
+export default hybrid
+```
+# D:\DStore\MyCode\myplugin\hooks\index.js
+```javascript
+export { default as useStorage } from './useStorage'
+export { default as useHybrid } from './useHybrid'
+```
+# D:\DStore\MyCode\myplugin\hybrid\imgDownload.js
+```javascript
+const hybrid = {
+    contentScript ({defineExpose}) {
+        const download = () => {
+            const imgs = document.querySelectorAll('img')
+            for (const img of imgs) {
+                const _img = new Image()
+                _img.src = img.src
+                _img.crossOrigin = 'Anonymous'
+                _img.onload = () => {
+                    const canvas = document.createElement('canvas')
+                    canvas.width = _img.width
+                    canvas.height = _img.height
+                    canvas.getContext('2d').drawImage(_img, 0, 0, canvas.width, canvas.height)
+
+                    console.log(canvas.toDataURL('image/png'))
+                    // console.log(e, 'e')
+                }
+            }
+        }
+
+        defineExpose(download)
+    }
+}
+
+export default hybrid
+```
+# D:\DStore\MyCode\myplugin\hybrid\domSelect.js
+```javascript
+
+import { ref, onMounted, onUnmounted } from 'vue'
+
+const hybrid = {
+    contentScript ({ defineExpose }) {
+        let el = ref(null)
+
+        const onMousemove = (e) => {
+            el.value = document.elementFromPoint(e.pageX, e.pageY)
+        }
+        document.addEventListener('mousemove', onMousemove)
+
+        defineExpose(el)
+    },
+    background () {
+
+    }
+}
+
+export default hybrid
+```
+# D:\DStore\MyCode\myplugin\hooks\useStorage.js
+```javascript
+import chrome from '@/chrome'
+import { ref, watch, toRaw } from 'vue'
+
+const useStorage = (
+    namespace,
+    options = {}
+) => {
+    const { initState = {}, reset = false } = options
+
+    const state = ref(initState)
+
+    if (reset) {
+        chrome.storage.sync.set(
+            {
+                [namespace]: toRaw(state.value)
+            }
+        )
+    } else {
+        chrome.storage.sync.get(
+            namespace,
+            (res) => {
+                // 已存在state, 更新本地state
+                if (Object.keys(res).length) {
+                    const value = res[namespace]
+    
+                    state.value = value
+                }
+                // 否则将本地state存入storage
+                else {
+                    chrome.storage.sync.set(
+                        {
+                            [namespace]: toRaw(state.value)
+                        }
+                    )
+                }
+            }
+        )
+    }
+    
+    let isLoacalLock = false
+    let isGlobalLock = false
+    // 监听全局state变化更新本地state
+    chrome.storage.onChanged.addListener((changes) => {
+        if (isGlobalLock || !changes[namespace]) return
+        const { newValue } = changes[namespace]
+        if (newValue !== state.value) {
+            isLoacalLock = true
+            state.value = newValue
+            isLoacalLock = false
+        }
+    })
+    // 监听本地state变化更新全局state
+    watch(
+        state, 
+        () => {
+            if (isLoacalLock) return
+            isGlobalLock = true
+            chrome.storage.sync.set(
+                {
+                    [namespace]: toRaw(state.value)
+                },
+                () => {
+                    isGlobalLock = false
+                }
+            )
+        },
+        {
+            deep: true
+        }
+    )
+
+    return state
+}
+
+export default useStorage
+```
+# D:\DStore\MyCode\myplugin\hybrid\index.js
+```javascript
+import { env } from '@/chrome'
+
+const modules = import.meta.glob('./*.js', { eager: true })
+
+let hybrids = []
+for (const [path, module] of Object.entries(modules)) {
+    const name = path.split('/').pop().replace('.js', '')
+
+    hybrids.push({
+        name,
+        module: module.default
+    })
+}
+
+const hybridStore = new Map()
+const install = (hybrids) => {
+    for (const { name, module } of hybrids) {
+        if (module[env]) {
+            if (typeof module[env] === 'function') {
+                const defineExpose = (expose) => {
+                    hybridStore.set(name, expose)
+                }
+    
+                module[env]({ defineExpose })
+            }
+            else {
+                throw new Error(`Hybrid of ${env} should be function.`)
+            }
+        }
+    }
+}
+
+export const useHybrid = (name) => {
+    if (hybridStore.has(name)) {
+        return hybridStore.get(name)
+    }
+    else {
+        throw new Error('Hybrid is not defined')
+    }
+}
+
+install(hybrids)
+```
+# D:\DStore\MyCode\myplugin\hooks\useHybrid.js
+```javascript
+export { useHybrid as default } from '@/hybrid'
+```
+# D:\DStore\MyCode\myplugin\storage\captrue.js
+```javascript
+export default {
+    name: 'captrue',
+    state: {
+        base64: '',
+    }
+}
+```
+# D:\DStore\MyCode\myplugin\storage\entry.js
+```javascript
+export default {
+    name: 'entry',
+    state: {
+        isEntryShow: true,
+        isDialogShow: false,
+    }
+}
+```
+# D:\DStore\MyCode\myplugin\template\manifest.json
+```javascript
+{
+    "manifest_version": 2,
+    "name": "Borderify",
+    "version": "1.0",
+    "description": "Adds a red border to all webpages matching mozilla.org.",
+    "icons": {
+        "48": "asset/bird.png"
+    },
+    "browser_action": {
+        "default_icon": "asset/bird.png",
+        "default_title": "Beastify",
+        "default_popup": "popup/popup.html"
+    },
+    "background": {
+        "scripts": [
+            "setup.js"
+        ]
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "setup.js"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "content_security_policy": "script-src 'self' http://localhost:1024/; object-src 'self'",
+    "web_accessible_resources": [
+        "chrome-extension://**/*"
+    ],
+    "permissions": [
+        "<all_urls>",
+        "activeTab",
+        "alarms",
+        "background",
+        "bookmarks",
+        "browserSettings",
+        "browsingData",
+        "captivePortal",
+        "clipboardRead",
+        "clipboardWrite",
+        "contentSettings",
+        "contextMenus",
+        "contextualIdentities",
+        "cookies",
+        "debugger",
+        "dns",
+        "downloads",
+        "downloads.open",
+        "find",
+        "geolocation",
+        "history",
+        "identity",
+        "idle",
+        "management",
+        "menus",
+        "menus.overrideContext",
+        "nativeMessaging",
+        "notifications",
+        "pageCapture",
+        "pkcs11",
+        "privacy",
+        "proxy",
+        "scripting",
+        "search",
+        "sessions",
+        "storage",
+        "tabHide",
+        "tabs",
+        "theme",
+        "topSites",
+        "unlimitedStorage",
+        "webNavigation",
+        "webRequest",
+        "webRequestBlocking",
+        "http://*/*",
+        "https://*/*"
+    ]
+}
+```
+# D:\DStore\MyCode\myplugin\template\setup.js
+```javascript
+// TODO 开发环境动态引入的js无法获取chrome.runtime，待解决。(这里考虑使用window.postMessage进行跨源脚本通信)
+// 因为chrome.runtime只有在指定的content_script运行期间被加载，当脚本运行结束时，会被卸载,这也是为什么普通网页脚本
+// 无法访问chrome.runtime的原因，然而background的脚本由于本属于插件的生态环境，因此不存在这个问题，动态加载的js也能
+// 访问到chrome.runtime。
+
+const chromeCallerHandle = ({ event, payload }) => {
+    if (!(event && event.startsWith('chrome.'))) {
+        return
+    }
+
+    const calls = event.split('.')
+
+    let fn = window
+    let context
+    for (const call of calls) {
+        context = fn
+        fn = fn[call]
+    }
+
+    let args = []
+    for (const arg of payload) {
+        if (
+            typeof arg === 'string' && 
+            arg.startsWith('Callback:')
+        ) {
+            args.push(
+                (...response) => {
+                    window.postMessage(
+                        {
+                            event: arg,
+                            payload: response
+                        },
+                        '*'
+                    )
+                }
+            )
+        }
+        else {
+            args.push(arg)
+        }
+    }
+
+    fn.apply(context, args)
+}
+
+let port
+const connectHandle = ({ event, payload }) => {
+    if (event === 'chrome.runtime.connect') {
+        port = chrome.runtime.connect(payload)
+    }
+
+    if (event?.startsWith('runtime.port.onMessage.addListener(')) {
+        const handle = /runtime\.port\.onMessage\.addListener\(([^\)]+)\)/.exec(event)[1]
+        if (handle) {
+            port.onMessage.addListener((payload) => {
+                payload = {
+                    event: handle,
+                    payload
+                }
+                window.postMessage(payload, '*')
+            })
+        }
+    }
+
+    if (event === 'runtime.port.postMessage') {
+        port.postMessage(payload)
+    }
+}
+
+window.addEventListener('message', (e) => {
+    if (e.data.event && (e.data.event === 'chrome.runtime.connect' || e.data.event.startsWith('runtime.port'))) {
+        connectHandle(e.data)
+    }
+    else {
+        chromeCallerHandle(e.data)
+    }
+})
+
+const setup = () => {
+    const CONTENT_SCRIPT = 'TO_BE_REPLACE_BY_START.JS'
+    const BACKGROUND_SCRIPT = 'TO_BE_REPLACE_BY_START.JS'
+
+    const isBackground = location.protocol === 'chrome-extension:'
+    const script = isBackground ? BACKGROUND_SCRIPT : CONTENT_SCRIPT
+
+    console.log(chrome)
+    if (isBackground) {
+
+    }
+    else {
+
+    }
+    
+    const loadScript = (src, cb) => {
+        const el = document.createElement('script')
+        el.setAttribute('type', 'module')
+        el.onload = () => {
+            cb()
+            el.remove()
+        }
+    
+        el.src = src
+        document.body.appendChild(el)
+    }
+
+    loadScript(script, () => {
+        console.log(`${script} loaded`)
+    })
+}
+
+setup()
+```
+# D:\DStore\MyCode\myplugin\storage\tabTest.js
+```javascript
+export default {
+    name: 'tabTest',
+    state: 3.1415926
+}
+```
+# D:\DStore\MyCode\myplugin\storage\index.js
+```javascript
+import { useStorage } from '@/hooks'
+import { provide as _provide } from 'vue'
+
+const modules = import.meta.glob('./*.js', { eager: true })
+
+const storage = {}
+for (const [, module] of Object.entries(modules)) {
+    const {name, state } = module.default
+    storage[name] = useStorage(name, { initState: state, reset: false })
+}
+
+const injections = new Map()
+export const provide = () => {
+    // For vue
+    _provide('storage', storage)
+    // For js
+    injections.set('storage', storage)
+    for (const [name, state] of Object.entries(storage)) {
+        _provide(`storage:${name}`, state)
+        injections.set(`storage:${name}`, state)
+    }
+}
+export const inject = (name) => {
+    if (injections.has(name)) {
+        return injections.get(name)
+    }
+    else {
+        throw new Error(`Storage of ${name} is not found.`)
+    }
+}
+
+export default storage
+```
+# D:\DStore\MyCode\myplugin\context\background\main.js
+```javascript
+
+import { provide } from '@/storage'
+// storage provide
+provide()
+import '@/hybrid'
+```
+# D:\DStore\MyCode\myplugin\context\contentScript\App.vue
+```javascript
+<template>
+    <entry></entry>
+</template>
+
+<script setup>
+import { provide } from '@/storage'
+import entry from './components/entry.vue'
+
+provide()
+</script>
+```
+# D:\DStore\MyCode\myplugin\context\contentScript\main.js
+```javascript
+import { createApp } from 'vue'
+import App from './App.vue'
+import Element from 'element-plus'
+import 'element-plus/dist/index.css'
+import '@/hybrid'
+
+const el = document.createElement('div')
+document.body.appendChild(el)
+createApp(App).use(Element).mount(el)
+```
+# D:\DStore\MyCode\myplugin\context\popup\App.vue
+```javascript
+<template>
+    <div class="popup">
+        <layout />
+    </div>
+</template>
+
+<script setup>
+import { provide } from '@/storage'
+import layout from './components/layout.vue'
+
+provide()
+</script>
+
+
+<style lang="scss" scoped>
+.popup {
+    color: red;
+}
+</style>
+```
+# D:\DStore\MyCode\myplugin\context\popup\main.js
+```javascript
+import { createApp } from 'vue'
+import App from './App.vue'
+import Element from 'element-plus'
+import 'element-plus/dist/index.css'
+import './style/index.css'
+import '@/hybrid'
+
+const el = document.createElement('div')
+
+document.body.appendChild(el)
+createApp(App).use(Element).mount(el)
+```
+# D:\DStore\MyCode\myplugin\template\popup\popup.html
+```javascript
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8">
+  </head>
+
+  <body>
+    <script src="http://localhost:${host}/context/popup/main.js" type="module"></script>
+  </body>
+
+</html>
+```
+# D:\DStore\MyCode\myplugin\context\contentScript\components\entry.vue
+```javascript
+<template>
+    <el-button v-if="state.isEntryShow" type="primary" class="entry" @click="toggle">
+        <el-icon><ArrowDownBold /></el-icon>
+    </el-button>
+    <el-dialog v-model="state.isDialogShow" width="60%">
+        <el-tabs v-model="activeTab">
+            <el-tab-pane label="Test" name="test"><test></test></el-tab-pane>
+            <el-tab-pane label="Connect" name="connect"><connect></connect></el-tab-pane>
+        </el-tabs>
+    </el-dialog>
+</template>
+
+<script setup>
+import { ref, inject } from 'vue'
+import { ArrowDownBold } from '@element-plus/icons-vue'
+
+import connect from './tabs/connect.vue'
+import test from './tabs/test.vue'
+
+const state = inject('storage:entry')
+
+const toggle = () => {
+    state.value.isDialogShow = !state.value.isDialogShow
+}
+const show = () =>{
+    state.value.isDialogShow = true
+}
+const hide = () => {
+    state.value.isDialogShow = false
+}
+
+const activeTab = ref('test')
+</script>
+
+
+<style scoped>
+.entry {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100000;
+    width: 60px;
+    height: 20px;
+}
+</style>
+```
+# D:\DStore\MyCode\myplugin\context\popup\style\index.css
+```javascript
+html, body {
+    width: 100px;
+    height: 100px;
+}
+```
+# D:\DStore\MyCode\myplugin\context\contentScript\components\tabs\connect.vue
+```javascript
+<template>
+    <p>
+        {{state}}
+    </p>
+</template>
+
+<script setup>
+import { inject } from 'vue'
+
+const state = inject('storage:tabTest')
+</script>
+
+<style>
+
+</style>
+```
