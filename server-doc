@@ -1,0 +1,324 @@
+# D:\DStore\MyCode\MyServer\document.md
+```javascript
+# D:\DStore\MyCode\MyServer\package.json
+```javascript
+{
+  "name": "chrome-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon --inspect src/index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "edge-paths": "^3.0.5",
+    "electron": "^22.0.0",
+    "koa": "^2.14.1",
+    "koa-bodyparser": "^4.3.0",
+    "koa-router": "^12.0.0",
+    "module-alias": "^2.2.2",
+    "mysql": "^2.18.1",
+    "mysql2": "^2.3.3",
+    "puppeteer": "^19.5.0",
+    "puppeteer-core": "^19.5.0",
+    "sequelize": "^6.28.0",
+    "sequelize-cli": "^6.5.2"
+  },
+  "_moduleAliases": {
+    "@src": "src"
+  },
+  "_moduleDirectories": [
+    "src"
+  ]
+}
+
+```
+# D:\DStore\MyCode\MyServer\src\index.js
+```javascript
+require('module-alias/register')
+require('./router')
+```
+# D:\DStore\MyCode\MyServer\src\config\index.js
+```javascript
+module.exports = {
+     port: 1024,
+     database: {
+          port: 3306,
+          name: 'chrome_plugin',
+          user: 'root',
+          password: '123456',
+     }
+}
+```
+# D:\DStore\MyCode\MyServer\src\database\index.js
+```javascript
+const Sequelize = require('sequelize')
+const { database: config } = require('@src/config')
+
+const database = new Sequelize(
+     config.name,
+     config.user,
+     config.password,
+     {
+          host: 'localhost',
+          port: config.port,
+          dialect: 'mysql',
+          pool: {
+               max: 100,
+               min: 5,
+               idle: 1000,
+          }
+     }
+)
+
+module.exports = database
+```
+# D:\DStore\MyCode\MyServer\src\server\index.js
+```javascript
+const Koa = require('koa')
+const Router = require('koa-router')
+const bodyParser = require('koa-bodyparser')
+const duration = require('@src/server/middleware/duration')
+const response = require('@src/server/middleware/response')
+const { port } = require('../config')
+
+class Server {
+     constructor () {
+          this.app = new Koa()
+          this.router = new Router()
+
+          for (const routerMethod of ['get',  'put', 'post', 'patch', 'delete', 'del']) {
+               this[routerMethod] = this.router[routerMethod].bind(this.router)
+          }
+
+          this.app.use(duration())
+          this.app.use(bodyParser())
+          this.app.use(response())
+
+          // 放入宏任务中, 等所有的中间件注册完成后再开启服务器
+          setTimeout(() => {
+               this.app.use(this.router.routes())
+               this.app.listen(port)
+          })
+     }
+
+     use (...args) {
+          return this.app.use(...args)
+     }
+}
+
+module.exports = new Server()
+```
+# D:\DStore\MyCode\MyServer\src\database\model\page.js
+```javascript
+const Sequelize = require('sequelize')
+const database = require('@src/database')
+
+const pageModel = database.define('page', {
+     id: {
+          type: Sequelize.INTEGER,
+          primaryKey: true,
+          autoIncrement: true,
+     },
+     url: {
+          type: Sequelize.STRING,
+          allowNull: false,
+     },
+     isDeleted: {
+          type: Sequelize.BOOLEAN,
+     }
+})
+
+pageModel.sync({force: false})
+module.exports = pageModel
+```
+# D:\DStore\MyCode\MyServer\src\database\model\index.js
+```javascript
+const pageModel = require('./page')
+
+module.exports = {
+     pageModel
+}
+```
+# D:\DStore\MyCode\MyServer\src\database\sql\createTable.sql
+```javascript
+create table if not exists pages (
+     id            bigint auto_increment comment 'id' primary key,
+     url           varchar(512)                       null comment '页面地址',
+     isDeleted     tinyint  default 0                 not null comment '是否删除',
+     
+)
+```
+# D:\DStore\MyCode\MyServer\src\server\middleware\duration.js
+```javascript
+module.exports = () => async (ctx, next) => {
+     const startTime = Date.now()
+     await next()
+     const duration = Date.now() - startTime
+     ctx.set('X-Response-Time', duration + 'ms')
+}
+```
+
+```
+# D:\DStore\MyCode\MyServer\package.json
+```javascript
+{
+  "name": "chrome-server",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "nodemon --inspect src/index.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "edge-paths": "^3.0.5",
+    "electron": "^22.0.0",
+    "koa": "^2.14.1",
+    "koa-bodyparser": "^4.3.0",
+    "koa-router": "^12.0.0",
+    "module-alias": "^2.2.2",
+    "mysql": "^2.18.1",
+    "mysql2": "^2.3.3",
+    "puppeteer": "^19.5.0",
+    "puppeteer-core": "^19.5.0",
+    "sequelize": "^6.28.0",
+    "sequelize-cli": "^6.5.2"
+  },
+  "_moduleAliases": {
+    "@src": "src"
+  },
+  "_moduleDirectories": [
+    "src"
+  ]
+}
+
+```
+# D:\DStore\MyCode\MyServer\src\index.js
+```javascript
+require('module-alias/register')
+require('./router')
+```
+# D:\DStore\MyCode\MyServer\src\config\index.js
+```javascript
+module.exports = {
+     port: 1024,
+     database: {
+          port: 3306,
+          name: 'chrome_plugin',
+          user: 'root',
+          password: '123456',
+     }
+}
+```
+# D:\DStore\MyCode\MyServer\src\database\index.js
+```javascript
+const Sequelize = require('sequelize')
+const { database: config } = require('@src/config')
+
+const database = new Sequelize(
+     config.name,
+     config.user,
+     config.password,
+     {
+          host: 'localhost',
+          port: config.port,
+          dialect: 'mysql',
+          pool: {
+               max: 100,
+               min: 5,
+               idle: 1000,
+          }
+     }
+)
+
+module.exports = database
+```
+# D:\DStore\MyCode\MyServer\src\server\index.js
+```javascript
+const Koa = require('koa')
+const Router = require('koa-router')
+const bodyParser = require('koa-bodyparser')
+const duration = require('@src/server/middleware/duration')
+const response = require('@src/server/middleware/response')
+const { port } = require('../config')
+
+class Server {
+     constructor () {
+          this.app = new Koa()
+          this.router = new Router()
+
+          for (const routerMethod of ['get',  'put', 'post', 'patch', 'delete', 'del']) {
+               this[routerMethod] = this.router[routerMethod].bind(this.router)
+          }
+
+          this.app.use(duration())
+          this.app.use(bodyParser())
+          this.app.use(response())
+
+          // 放入宏任务中, 等所有的中间件注册完成后再开启服务器
+          setTimeout(() => {
+               this.app.use(this.router.routes())
+               this.app.listen(port)
+          })
+     }
+
+     use (...args) {
+          return this.app.use(...args)
+     }
+}
+
+module.exports = new Server()
+```
+# D:\DStore\MyCode\MyServer\src\database\model\index.js
+```javascript
+const pageModel = require('./page')
+
+module.exports = {
+     pageModel
+}
+```
+# D:\DStore\MyCode\MyServer\src\database\model\page.js
+```javascript
+const Sequelize = require('sequelize')
+const database = require('@src/database')
+
+const pageModel = database.define('page', {
+     id: {
+          type: Sequelize.INTEGER,
+          primaryKey: true,
+          autoIncrement: true,
+     },
+     url: {
+          type: Sequelize.STRING,
+          allowNull: false,
+     },
+     isDeleted: {
+          type: Sequelize.BOOLEAN,
+     }
+})
+
+pageModel.sync({force: false})
+module.exports = pageModel
+```
+# D:\DStore\MyCode\MyServer\src\database\sql\createTable.sql
+```javascript
+create table if not exists pages (
+     id            bigint auto_increment comment 'id' primary key,
+     url           varchar(512)                       null comment '页面地址',
+     isDeleted     tinyint  default 0                 not null comment '是否删除',
+     
+)
+```
+# D:\DStore\MyCode\MyServer\src\server\middleware\duration.js
+```javascript
+module.exports = () => async (ctx, next) => {
+     const startTime = Date.now()
+     await next()
+     const duration = Date.now() - startTime
+     ctx.set('X-Response-Time', duration + 'ms')
+}
+```
