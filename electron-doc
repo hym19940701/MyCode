@@ -1,0 +1,787 @@
+# D:\DStore\MyCode\MyWorkspace\main.js
+```javascript
+require('packageMain')
+```
+# D:\DStore\MyCode\MyWorkspace\package.json
+```javascript
+{
+  "name": "myworkspace",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development node bin/start.js",
+    "build": "cross-env NODE_ENV=production node bin/start.js",
+    "dev:renderer": "node packages/renderer/bin/dev.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^22.0.1",
+    "lodash": "^4.17.21",
+    "rollup": "^3.17.2",
+    "rollup-plugin-commonjs": "^10.1.0"
+  }
+}
+
+```
+# D:\DStore\MyCode\MyWorkspace\README.md
+```javascript
+## 项目初始化
+
+-安装主依赖 `npm install`
+-安装子依赖 
+```javascript
+
+```
+
+```
+# D:\DStore\MyCode\MyWorkspace\bin\start.js
+```javascript
+const { NODE_ENV } = process.env
+const { spawn } = require('child_process')
+const { debounce } = require('lodash')
+const electron = require('electron')
+
+let electronProcess = null
+
+const startElectron = () => {
+    console.log('start electron...')
+
+    const electronProcess = spawn(
+        electron,
+        [
+            require('path').join(__dirname, '../main.js')
+        ],
+        {
+            stdio: ['ipc']
+        }
+    )
+
+    electronProcess.stdout.pipe(process.stdout)
+
+    return electronProcess
+}
+
+(async () => {
+    const mode = NODE_ENV === 'development' ? 'dev' : 'build'
+    const promises = ['packageMain', 'packagePreload', 'packageRenderer'].map(
+        pkgName => {
+            return import(`${pkgName}/bin/${mode}.js`)
+        }
+    )
+
+    const pkgBins = await Promise.all(promises)
+
+    Promise.all(pkgBins.map(item => item.default()))
+        .then(([devWatcher]) => {
+            if (mode === 'dev') {
+                electronProcess = startElectron()
+                devWatcher.on('event', debounce(event => {
+                    if (event.code === 'END') {
+                        if (electronProcess) {
+                            process.kill(electronProcess.pid)
+                        }
+                        electronProcess = startElectron()
+                    }
+                }, 300))
+            }
+            else {
+                console.log('build finish')
+                startElectron()
+            }
+        })
+})()
+```
+# D:\DStore\MyCode\MyWorkspace\packages\main\package.json
+```javascript
+{
+  "name": "packageMain",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "node bin/dev.js",
+    "build": "node bin/build.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\preload\package.json
+```javascript
+{
+  "name": "packagePreload",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/preload.js",
+  "scripts": {
+    "dev": "node bin/dev.js",
+    "build": "node bin/build.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\index.html
+```javascript
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + React + TS</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\package.json
+```javascript
+{
+  "name": "packageRenderer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node bin/dev.js",
+    "build": "node bin/build.js",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.27",
+    "@types/react-dom": "^18.0.10",
+    "@vitejs/plugin-react": "^3.1.0",
+    "typescript": "^4.9.3",
+    "vite": "^4.1.0"
+  }
+}
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\tsconfig.json
+```javascript
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": false,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx"
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\tsconfig.node.json
+```javascript
+{
+  "compilerOptions": {
+    "composite": true,
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["vite.config.ts"]
+}
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\vite.config.ts
+```javascript
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import commonjs from 'rollup-plugin-commonjs'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\share\package.json
+```javascript
+{
+  "name": "packageShare",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\share\index.js
+```javascript
+const createRollupConfig = require('./rollup-tools/createRollupConfig')
+const config = require('./config')
+const bridge = require('./bridge')
+
+module.exports = {
+    config,
+    bridge,
+    createRollupConfig,
+}
+```
+# D:\DStore\MyCode\MyWorkspace\packages\preload\bin\build.js
+```javascript
+const rollup = require('rollup')
+const path = require('path')
+const { createRollupConfig } = require('packageShare')
+
+const root = path.resolve(__dirname, '../')
+
+const { inputConfig, outputConfig } = createRollupConfig('production', root)
+const run = async () => {
+     const bundle = await rollup.rollup(inputConfig)
+     return await bundle.write(outputConfig)
+}
+
+if (process.env.INIT_CWD === root) {
+     run()
+}
+
+module.exports = run
+```
+# D:\DStore\MyCode\MyWorkspace\packages\preload\bin\dev.js
+```javascript
+const rollup = require('rollup')
+const path = require('path')
+const { createRollupConfig } = require('packageShare')
+
+const root = path.resolve(__dirname, '../')
+const rollupConfig = createRollupConfig('development', root)
+
+if (process.env.INIT_CWD === root) {
+     rollup.watch(rollupConfig)
+}
+
+module.exports = async () => Promise.resolve(rollup.watch(rollupConfig))
+
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\bin\build.js
+```javascript
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { build } from 'vite'
+
+const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)))
+
+const run = () => build({
+    root,
+    base: './',
+    build: {
+        rollupOptions: {
+            plugins: [
+
+            ]
+            // ...
+        },
+    },
+})
+
+if (process.env.INIT_CWD === root) {
+    run()
+}
+
+export default run
+```
+# D:\DStore\MyCode\MyWorkspace\packages\preload\src\expose.js
+```javascript
+
+import { contextBridge, ipcRenderer } from 'electron'
+
+const EXPOSE_NAME = 'bridge'
+
+const bridge = {
+     invoke (event, ...args) {
+          return ipcRenderer.invoke(event, ...args)
+     },
+     send (event, ...args) {
+          return ipcRenderer.send(event, ...args)
+     }
+}
+
+const expose = () => {
+     console.log(contextBridge, 'contextBridge')
+     contextBridge.exposeInMainWorld(EXPOSE_NAME, bridge)
+}
+
+export default expose
+```
+# D:\DStore\MyCode\MyWorkspace\packages\preload\src\index.js
+```javascript
+import expose from './expose'
+
+expose()
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\src\App.css
+```javascript
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\main\src\index.js
+```javascript
+import { app, BrowserWindow, ipcMain } from 'electron'
+import path from 'path'
+import fs from 'fs'
+import { config, bridge } from 'packageShare'
+
+const ENV = process.env.NODE_ENV === 'development' ? 'development' : 'production'
+
+const { packages } = config.path
+const pkgPreload = fs.readFileSync(path.resolve(packages, 'preload/package.json'), 'utf-8')
+
+const createWindow = () => {
+    const options = {
+        width: 1200,
+        height: 800,
+        webPreferences: {
+            preload: path.resolve(packages, 'preload', JSON.parse(pkgPreload).main),
+        }
+    }
+
+    const winURL = {
+        development: `http://localhost:${config.port.renderer}/`,
+        production: path.resolve(packages, 'renderer/dist/index.html')
+    }[ENV]
+
+    new BrowserWindow(options).loadURL(winURL)
+}
+
+const onReady = () => {
+    bridge.initHandles(ipcMain)
+    createWindow()
+    app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+}
+
+const onClose = () => {
+    if (process.platform !== 'darwin') app.quit()
+}
+
+app.whenReady().then(onReady)
+app.on('window-all-closed', onClose)
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\bin\dev.js
+```javascript
+import { createServer } from 'vite'
+import { fileURLToPath } from 'url'
+import { config } from 'packageShare'
+import path from 'path'
+
+const root = path.resolve(fileURLToPath(new URL('../', import.meta.url)))
+
+const run = async () => {
+     const server = await createServer({
+          // 任何合法的用户配置选项，加上 `mode` 和 `configFile`
+          configFile: path.resolve(root, 'vite.config.js'),
+          root,
+          server: {
+               port: config.port.renderer
+          }
+     })
+     await server.listen()
+     server.printUrls()
+     
+     const portReg = /http:\/\/localhost:(\d+)/
+     const livePort = server.resolvedUrls.local[0].match(portReg)[1]
+
+     return Promise.resolve({
+          mode: 'development',
+          port: livePort,
+     })
+}
+
+if (process.env.INIT_CWD === root) {
+     run()
+}
+
+export default run
+  
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\main\bin\build.js
+```javascript
+const rollup = require('rollup')
+const path = require('path')
+const { createRollupConfig } = require('packageShare')
+
+const root = path.resolve(__dirname, '../')
+
+const { inputConfig, outputConfig } = createRollupConfig('production', root)
+const run = async () => {
+     const bundle = await rollup.rollup(inputConfig)
+     return await bundle.write(outputConfig)
+}
+
+if (process.env.INIT_CWD === root) {
+     run()
+}
+
+module.exports = run
+```
+# D:\DStore\MyCode\MyWorkspace\packages\main\bin\dev.js
+```javascript
+const rollup = require('rollup')
+const path = require('path')
+const { createRollupConfig } = require('packageShare')
+
+const root = path.resolve(__dirname, '../')
+const rollupConfig = createRollupConfig('development', root)
+
+if (process.env.INIT_CWD === root) {
+     rollup.watch(rollupConfig)
+}
+
+module.exports = async () => Promise.resolve(rollup.watch(rollupConfig))
+
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\src\vite-env.d.ts
+```javascript
+/// <reference types="vite/client" />
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\src\main.tsx
+```javascript
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\src\App.tsx
+```javascript
+import { useState } from 'react'
+import reactLogo from './assets/react.svg'
+import './App.css'
+// import { config } from 'packageShare'
+// console.log(config, 'config')
+
+function App() {
+  const [count, setCount] = useState(0)
+
+  const test = () => {
+    // @ts-ignore
+    window.bridge.invoke('OPEN_DIALOG')
+    // bridge.invoke(bridge.EVENT.OPEN_DIALOG)
+  }
+
+  return (
+    <div className="App">
+      <div>
+        <a href="https://vitejs.dev" target="_blank">
+          <img src="/vite.svg" className="logo" alt="Vite logo" />
+        </a>
+        <a href="https://reactjs.org" target="_blank">
+          <img src={reactLogo} className="logo react" alt="React logo" />
+        </a>
+      </div>
+      <h1>Vite + React</h1>
+      <div className="card">
+        <button onClick={() => test()}>
+          count is {count}
+        </button>
+        <p>
+          Edit <code>src/App.tsx</code> and save to test HMR
+        </p>
+      </div>
+      <p className="read-the-docs">
+        Click on the Vite and React logos to learn more
+      </p>
+    </div>
+  )
+}
+
+export default App
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\share\config\index.js
+```javascript
+const path = require('path')
+
+const root = path.resolve(__dirname, '../../../')
+const packages = path.resolve(root, 'packages')
+
+const config = {
+    port: {
+        main: 1024,
+        renderer: 2048,
+    },
+    path: {
+        root,
+        packages,
+    }
+}
+
+module.exports = config
+```
+# D:\DStore\MyCode\MyWorkspace\packages\share\rollup-tools\createRollupConfig.js
+```javascript
+const fs = require('fs')
+const path = require('path')
+const commonjs = require('rollup-plugin-commonjs')
+
+const ENV = {
+    DEV: 'development',
+    PRO: 'production',
+}
+
+const getAssetPath = (root) => {
+    const pkg = fs.readFileSync(path.resolve(root, 'package.json'))
+    const { main } = JSON.parse(pkg)
+    return path.parse(main)
+}
+
+const createBuildConfig = (root) => {
+    const { name, dir } = getAssetPath(root)
+
+    const inputConfig = {
+        input: {
+            [name]: path.resolve(root, 'src/index.js')
+        },
+        plugins: [
+            commonjs()
+        ]
+    }
+    const outputConfig = {
+        dir: path.resolve(root, dir),
+        entryFileNames: '[name].js',
+        format: 'cjs'
+    }
+
+    return {
+        inputConfig,
+        outputConfig
+    }
+}
+
+const createDevConfig = (root) => {
+    const { name, dir } = getAssetPath(root)
+
+    const rollupConfig = {
+        input: {
+            [name]: path.resolve(root, 'src/index.js')
+        },
+        output: {
+            dir: path.resolve(root, dir),
+            entryFileNames: '[name].js',
+            format: 'cjs'
+        },
+        plugins: [
+            commonjs(),
+        ],
+        external: ['electron', 'path', 'session']
+   }
+
+   return rollupConfig
+}
+
+const createRollupConfig = (env, root) => {
+    return env === ENV.DEV 
+                        ? createDevConfig(root)
+                        : createBuildConfig(root)
+}
+
+module.exports = createRollupConfig
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\src\index.css
+```javascript
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
+
+```
+# D:\DStore\MyCode\MyWorkspace\packages\share\bridge\event.js
+```javascript
+const EVENT = {
+    OPEN_DIALOG: 'OPEN_DIALOG'
+}
+
+module.exports = EVENT
+```
+# D:\DStore\MyCode\MyWorkspace\packages\share\bridge\index.js
+```javascript
+const EVENT = require('./event')
+
+const HANDLES = {
+    [EVENT.OPEN_DIALOG]: async () => {
+        const { dialog } = require('electron')
+        const { canceled, filePaths } = await dialog.showOpenDialog()
+        if (canceled) {
+            return
+        } else {
+            return filePaths[0]
+        }
+    }
+}
+
+const bridge = {
+    EVENT: EVENT,
+    HANDLES: HANDLES,
+    initHandles (ipcMain) {
+        for (const [event, handle] of Object.entries(HANDLES)) {
+            ipcMain.handle(event, handle)
+        }
+    },
+    invoke ([event, ...args]) {
+        // Call preload injected bridge
+        if (window.bridge) {
+            return window.bridge.invoke(event, ...args)
+        }
+        else {
+            throw new Error('Client bridge is not init')
+        }
+    }
+}
+
+module.exports = bridge
+```
+# D:\DStore\MyCode\MyWorkspace\packages\renderer\public\vite.svg
+```javascript
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" class="iconify iconify--logos" width="31.88" height="32" preserveAspectRatio="xMidYMid meet" viewBox="0 0 256 257"><defs><linearGradient id="IconifyId1813088fe1fbc01fb466" x1="-.828%" x2="57.636%" y1="7.652%" y2="78.411%"><stop offset="0%" stop-color="#41D1FF"></stop><stop offset="100%" stop-color="#BD34FE"></stop></linearGradient><linearGradient id="IconifyId1813088fe1fbc01fb467" x1="43.376%" x2="50.316%" y1="2.242%" y2="89.03%"><stop offset="0%" stop-color="#FFEA83"></stop><stop offset="8.333%" stop-color="#FFDD35"></stop><stop offset="100%" stop-color="#FFA800"></stop></linearGradient></defs><path fill="url(#IconifyId1813088fe1fbc01fb466)" d="M255.153 37.938L134.897 252.976c-2.483 4.44-8.862 4.466-11.382.048L.875 37.958c-2.746-4.814 1.371-10.646 6.827-9.67l120.385 21.517a6.537 6.537 0 0 0 2.322-.004l117.867-21.483c5.438-.991 9.574 4.796 6.877 9.62Z"></path><path fill="url(#IconifyId1813088fe1fbc01fb467)" d="M185.432.063L96.44 17.501a3.268 3.268 0 0 0-2.634 3.014l-5.474 92.456a3.268 3.268 0 0 0 3.997 3.378l24.777-5.718c2.318-.535 4.413 1.507 3.936 3.838l-7.361 36.047c-.495 2.426 1.782 4.5 4.151 3.78l15.304-4.649c2.372-.72 4.652 1.36 4.15 3.788l-11.698 56.621c-.732 3.542 3.979 5.473 5.943 2.437l1.313-2.028l72.516-144.72c1.215-2.423-.88-5.186-3.54-4.672l-25.505 4.922c-2.396.462-4.435-1.77-3.759-4.114l16.646-57.705c.677-2.35-1.37-4.583-3.769-4.113Z"></path></svg>
+```
